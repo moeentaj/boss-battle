@@ -2,116 +2,97 @@ import streamlit as st
 from groq import Groq
 import random
 
-# --- 1. INITIALIZATION ---
-# Get your FREE API key from https://console.groq.com/
+# --- 1. CONFIGURATION ---
+TOPIC = "AI for Entrepreneurs"
+TOTAL_QUESTIONS = 5
+
 if "GROQ_API_KEY" not in st.secrets:
-    st.error("Please add GROQ_API_KEY to your Streamlit Secrets!")
+    st.error("Please add GROQ_API_KEY to your Secrets!")
     st.stop()
 
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-# Initialize Game State
+# --- 2. SESSION STATE ---
 if "hp" not in st.session_state:
     st.session_state.hp = 100
-if "current_q" not in st.session_state:
-    st.session_state.current_q = "What is the difference between a list and a tuple in Python?"
+if "count" not in st.session_state:
+    st.session_state.count = 1
 if "battle_log" not in st.session_state:
-    st.session_state.battle_log = ["⚔️ A new challenger appears!"]
+    st.session_state.battle_log = ["🚀 Welcome, Entrepreneur! Defeat the Sentinel to prove your AI readiness."]
+if "current_q" not in st.session_state:
+    # Initial Question Prompt
+    st.session_state.current_q = "How can an entrepreneur use a Large Language Model (LLM) to save 10 hours of work per week?"
 
-# --- 2. GAME LOGIC FUNCTIONS ---
+# --- 3. AI LOGIC ---
 def get_ai_response(prompt):
-    """Fetch response from Open Source Llama 3 model."""
-    try:
-        chat_completion = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="llama-3.1-8b-instant",
-        )
-        return chat_completion.choices[0].message.content
-    except Exception as e:
-        return f"Error: {str(e)}"
+    chat_completion = client.chat.completions.create(
+        messages=[{"role": "system", "content": f"You are an expert consultant for the course '{TOPIC}'."}, 
+                  {"role": "user", "content": prompt}],
+        model="llama-3.1-8b-instant",
+    )
+    return chat_completion.choices[0].message.content
 
-def process_attack(user_answer):
-    """Evaluate answer and calculate damage with Crit/Miss logic."""
+def handle_attack(user_answer):
+    # Evaluate Answer
     eval_prompt = f"""
+    Topic: {TOPIC}
     Question: {st.session_state.current_q}
     Student Answer: {user_answer}
     
-    You are a game engine. Rate the answer quality from 0 to 10.
+    Task: Grade the answer 0-10 based on business accuracy.
     Return ONLY the number.
     """
-    quality_score = get_ai_response(eval_prompt)
+    score_str = get_ai_response(eval_prompt)
+    score = int(''.join(filter(str.isdigit, score_str))) if any(c.isdigit() for c in score_str) else 0
     
-    # Try to parse the score, default to 0 if AI rambles
-    try:
-        score = int(''.join(filter(str.isdigit, quality_score)))
-    except:
-        score = 0
-
-    # Base Damage calculation
-    base_damage = score * 3 
+    damage = score * 2
+    st.session_state.hp -= damage
+    st.session_state.battle_log.insert(0, f"Round {st.session_state.count}: Hit for {damage} damage!")
     
-    # RNG Logic: Crit & Miss
-    roll = random.random() # 0.0 to 1.0
-    
-    if score == 0:
-        outcome = "❌ MISS! Your answer was incorrect."
-        final_damage = 0
-    elif roll < 0.15: # 15% Crit Chance
-        outcome = "✨ CRITICAL HIT! Double damage dealt!"
-        final_damage = base_damage * 2
-    elif roll > 0.95: # 5% Random Miss Chance
-        outcome = "🛡️ DEFLECTED! The boss parried your move."
-        final_damage = 0
+    # Check if we should generate a new question
+    if st.session_state.count < TOTAL_QUESTIONS:
+        st.session_state.count += 1
+        new_q_prompt = f"Generate a unique question for an entrepreneur about {TOPIC}. Keep it practical (e.g., about ROI, tools, or automation)."
+        st.session_state.current_q = get_ai_response(new_q_prompt)
     else:
-        outcome = "✅ HIT! Good explanation."
-        final_damage = base_damage
+        st.session_state.count = 6 # Mark as finished
 
-    # Update State
-    st.session_state.hp = max(0, st.session_state.hp - final_damage)
-    st.session_state.battle_log.insert(0, f"{outcome} (-{final_damage} HP)")
-    
-    # Get new question if boss is alive
-    if st.session_state.hp > 0:
-        st.session_state.current_q = get_ai_response("Generate a short, unique Python interview question.")
+# --- 4. UI ---
+st.title("💼 AI for Entrepreneurs: Boss Battle")
 
-# --- 3. UI LAYOUT ---
-st.set_page_config(page_title="AI Boss Battle", page_icon="🛡️")
-
-# HUD (Heads-up Display)
-col1, col2 = st.columns([1, 3])
+# HUD
+col1, col2 = st.columns([1, 2])
 with col1:
-    st.markdown("### ❤️ HP")
+    st.metric("Question", f"{min(st.session_state.count, 5)} / {TOTAL_QUESTIONS}")
 with col2:
-    hp_color = "green" if st.session_state.hp > 50 else "orange" if st.session_state.hp > 20 else "red"
-    st.progress(st.session_state.hp / 100, text=f"{st.session_state.hp}% Remaining")
+    st.progress(st.session_state.hp / 100, text=f"Sentinel Integrity: {st.session_state.hp}%")
 
-# Main Battle Scene
-if st.session_state.hp > 0:
-    st.info(f"**The Sentinel's Challenge:**\n\n{st.session_state.current_q}")
+# Main Logic
+if st.session_state.count <= TOTAL_QUESTIONS:
+    st.write(f"### Q{st.session_state.count}: {st.session_state.current_q}")
     
-    with st.form("attack_form", clear_on_submit=True):
-        user_input = st.text_input("Your Answer:", placeholder="Type your knowledge here...")
-        submit = st.form_submit_button("🚀 LAUNCH ATTACK")
-        
-        if submit and user_input:
-            with st.spinner("Calculating trajectory..."):
-                process_attack(user_input)
-                st.rerun()
+    with st.form("attack_form"):
+        ans = st.text_input("Your Strategic Move:")
+        if st.form_submit_button("🚀 ATTACK") and ans:
+            handle_attack(ans)
+            st.rerun()
 else:
+    # --- END GAME SCENE ---
     st.balloons()
-    st.success("🏆 VICTORY! You have mastered the module.")
-    if st.button("🔄 Restart Battle"):
-        st.session_state.hp = 100
-        st.session_state.battle_log = ["⚔️ The Sentinel returns..."]
+    st.success("🏁 ASSESSMENT COMPLETE")
+    final_score = 100 - st.session_state.hp
+    st.subheader(f"Entrepreneurial AI Score: {final_score}%")
+    
+    if final_score > 70:
+        st.write("You are ready to automate your business! 🚀")
+    else:
+        st.write("Keep studying! The AI revolution waits for no one. 📚")
+        
+    if st.button("Reset Assessment"):
+        for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 
-# 4. PERSISTENT BATTLE LOG (Now visible below)
+# History Log
 st.write("---")
-st.subheader("📜 Battle History")
 for entry in st.session_state.battle_log[:5]:
-    if "❌" in entry or "🛡️" in entry:
-        st.error(entry)
-    elif "✨" in entry:
-        st.warning(entry) # Golden/Yellow for crits
-    else:
-        st.success(entry)
+    st.text(entry)
