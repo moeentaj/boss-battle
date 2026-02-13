@@ -1,61 +1,81 @@
 import streamlit as st
+from openai import OpenAI
 
-# --- CONFIGURATION ---
-BOSS_NAME = "The Syntax Sentinel"
-MAX_HP = 100
+# 1. Setup API Client (Secrets stored in Streamlit Cloud)
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# --- SESSION STATE INITIALIZATION ---
-# This ensures the game doesn't restart every time the user clicks a button
+# --- SESSION STATE ---
 if "hp" not in st.session_state:
-    st.session_state.hp = MAX_HP
-if "log" not in st.session_state:
-    st.session_state.log = ["A wild Syntax Sentinel appears!"]
+    st.session_state.hp = 100
+if "current_question" not in st.session_state:
+    st.session_state.current_question = "Explain the difference between a list and a tuple."
+if "battle_log" not in st.session_state:
+    st.session_state.battle_log = []
 
-# --- UI LAYOUT ---
-st.title("⚔️ Course Boss Battle")
+# --- AI FUNCTIONS ---
+def generate_new_question():
+    """Ask the AI to provide a random challenge based on the course topic."""
+    prompt = "You are a Python instructor. Generate one short, challenging technical question for a student."
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
 
-# Sidebar for Stats
-st.sidebar.header("Student Stats")
-st.sidebar.metric("Your Knowledge", "100%")
+def evaluate_answer(question, answer):
+    """Ask the AI to grade the answer and return damage points."""
+    prompt = f"""
+    Question: {question}
+    Student Answer: {answer}
+    
+    You are a game engine. Evaluate this answer. 
+    Return exactly in this format:
+    Score: [0-40]
+    Feedback: [Short 1-sentence response]
+    """
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "system", "content": prompt}]
+    )
+    return response.choices[0].message.content
 
-# Boss Visuals (Using a simple placeholder or text for now)
-st.header(BOSS_NAME)
-hp_percent = st.session_state.hp / MAX_HP
+# --- UI ---
+st.title("⚔️ AI Boss Battle")
 
-# Dynamic Health Bar
-bar_color = "green" if hp_percent > 0.5 else "orange" if hp_percent > 0.2 else "red"
-st.progress(hp_percent)
-st.subheader(f"Boss HP: {st.session_state.hp} / {MAX_HP}")
-
-# --- BATTLE LOGIC ---
 if st.session_state.hp > 0:
-    # 1. The Question Area
-    st.write("### The Sentinel challenges you!")
-    st.info("What is the correct way to define a function in Python?")
+    st.progress(st.session_state.hp / 100)
+    st.write(f"### Boss Challenge: \n {st.session_state.current_question}")
     
-    # 2. Input
-    answer = st.text_input("Type your code answer:", key="user_answer")
+    user_input = st.text_area("Your Answer:", placeholder="Type your explanation or code here...")
     
-    if st.button("Cast Spell (Submit)"):
-        # Simple Logic Check
-        if "def" in answer.lower() and ":" in answer:
-            damage = 25
-            st.session_state.hp -= damage
-            st.session_state.log.insert(0, f"✅ CRITICAL HIT! You dealt {damage} damage.")
-        else:
-            st.session_state.log.insert(0, "❌ BLOCKED! The Sentinel parried your weak syntax.")
-        st.rerun()
+    if st.button("Attack!"):
+        with st.spinner("The Boss is evaluating your move..."):
+            result = evaluate_answer(st.session_state.current_question, user_input)
+            
+            # Parse the AI response (Simple parsing for demo)
+            try:
+                damage = int(result.split("Score:")[1].split("\n")[0].strip())
+                feedback = result.split("Feedback:")[1].strip()
+                
+                st.session_state.hp -= damage
+                st.session_state.battle_log.insert(0, f"💥 {feedback} (-{damage} HP)")
+                
+                # If boss is still alive, give a new question for the next round
+                if st.session_state.hp > 0:
+                    st.session_state.current_question = generate_new_question()
+                st.rerun()
+            except:
+                st.error("The Boss is confused by your energy. Try again!")
 
 else:
     st.balloons()
-    st.success(f"VICTORY! You have defeated {BOSS_NAME}!")
-    if st.button("Reset Battle"):
-        st.session_state.hp = MAX_HP
-        st.session_state.log = ["The Sentinel has respawned..."]
+    st.success("The Boss has been defeated! You are a Master.")
+    if st.button("Restart Journey"):
+        st.session_state.hp = 100
+        st.session_state.current_question = generate_new_question()
+        st.session_state.battle_log = []
         st.rerun()
 
-# --- BATTLE LOG ---
-st.write("---")
-st.write("### Battle History")
-for entry in st.session_state.log[:5]: # Show last 5 actions
-    st.text(entry)
+# Log Display
+for entry in st.session_state.battle_log[:3]:
+    st.write(entry)
